@@ -1,9 +1,11 @@
 require 'formula'
 
 class Node <Formula
-  url 'http://s3.amazonaws.com/four.livejournal/20091107/node-v0.1.17.tar.gz'
+  url 'http://s3.amazonaws.com/four.livejournal/20091206/node-v0.1.21.tar.gz'
   homepage 'http://nodejs.org/'
-  md5 '4e6c0427da7ff67cd475f28affb859e4'
+  md5 'c72b29a803d9bb3aed0fce5245d8b03b'
+
+  aka 'node.js'
 
   def skip_clean? path
     # TODO: at some point someone should tweak this so it only skips clean

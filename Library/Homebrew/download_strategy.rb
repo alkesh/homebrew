@@ -30,6 +30,26 @@ class AbstractDownloadStrategy
     end
     @unique_token="#{name}-#{version}" unless name.to_s.empty? or name == '__UNKNOWN__'
   end
+
+  def expand_safe_system_args args
+    args.each_with_index do |arg, ii|
+      if arg.is_a? Hash
+        unless ARGV.verbose?
+          args[ii] = arg[:quiet_flag]
+        else
+          args.delete_at ii
+        end
+        return args
+      end
+    end
+    # 2 as default because commands are eg. svn up, git pull
+    args.insert(2, '-q') unless ARGV.verbose?
+    return args
+  end
+
+  def quiet_safe_system *args
+    safe_system *expand_safe_system_args(args)
+  end
 end
 
 class CurlDownloadStrategy <AbstractDownloadStrategy
@@ -44,7 +64,7 @@ class CurlDownloadStrategy <AbstractDownloadStrategy
       begin
         curl @url, '-o', @dl
       rescue Exception
-        @dl.unlink if @dl.exist?
+        ignore_interrupts { @dl.unlink if @dl.exist? }
         raise
       end
     else
@@ -52,13 +72,14 @@ class CurlDownloadStrategy <AbstractDownloadStrategy
     end
     return @dl # thus performs checksum verification
   end
+
   def stage
     # magic numbers stolen from /usr/share/file/magic/
     File.open(@dl) do |f|
       # get the first four bytes
       case f.read(4)
       when /^PK\003\004/ # .zip archive
-        safe_system '/usr/bin/unzip', '-qq', @dl
+        quiet_safe_system '/usr/bin/unzip', {:quiet_flag => '-qq'}, @dl
         chdir
       when /^\037\213/, /^BZh/ # gzip/bz2 compressed
         # TODO check if it's really a tar archive
@@ -74,6 +95,7 @@ class CurlDownloadStrategy <AbstractDownloadStrategy
       end
     end
   end
+
 private
   def chdir
     entries=Dir['*']
@@ -82,6 +104,7 @@ private
       when 1 then Dir.chdir entries.first rescue nil
     end
   end
+
   def ext
     # GitHub uses odd URLs for zip files, so check for those
     rx=%r[http://(www\.)?github\.com/.*/(zip|tar)ball/]
@@ -97,12 +120,11 @@ private
   end
 end
 
-class HttpDownloadStrategy <CurlDownloadStrategy
-  def initialize url, name, version, specs
-    opoo "HttpDownloadStrategy is deprecated"
-    puts "Please use CurlDownloadStrategy in future"
-    puts "HttpDownloadStrategy will be removed in version 0.5"
-    super url, name, version, specs
+# Use this strategy to download but not unzip a file.
+# Useful for installing jars.
+class NoUnzipCurlDownloadStrategy <CurlDownloadStrategy
+  def stage
+    FileUtils.mv @dl, File.basename(@url)
   end
 end
 
@@ -111,24 +133,25 @@ class SubversionDownloadStrategy <AbstractDownloadStrategy
     ohai "Checking out #{@url}"
     @co=HOMEBREW_CACHE+@unique_token
     unless @co.exist?
-      checkout_args = ['/usr/bin/svn', 'checkout', @url]
-      
-      if (@spec == :revision) and @ref
-        checkout_args << '-r'
-        checkout_args << @ref
-      end
-
-      checkout_args << @co
-
-      safe_system *checkout_args
+      quiet_safe_system svn, 'checkout', @url, @co
     else
       # TODO svn up?
       puts "Repository already checked out"
     end
   end
+
   def stage
     # Force the export, since the target directory will already exist
-    safe_system '/usr/bin/svn', 'export', '--force', @co, Dir.pwd
+    args = [svn, 'export', '--force', @co, Dir.pwd]
+    args << '-r' << @ref if @spec == :revision and @ref
+    quiet_safe_system *args
+  end
+
+  # Override this method in a DownloadStrategy to force the use of a non-
+  # sysetm svn binary. mplayer.rb uses this to require a svn that
+  # understands externals.
+  def svn
+    '/usr/bin/svn'
   end
 end
 
@@ -137,12 +160,13 @@ class GitDownloadStrategy <AbstractDownloadStrategy
     ohai "Cloning #{@url}"
     @clone=HOMEBREW_CACHE+@unique_token
     unless @clone.exist?
-      safe_system 'git', 'clone', @url, @clone
+      quiet_safe_system 'git', 'clone', @url, @clone
     else
       # TODO git pull?
       puts "Repository already cloned to #{@clone}"
     end
   end
+
   def stage
     dst = Dir.getwd
     Dir.chdir @clone do
@@ -150,9 +174,9 @@ class GitDownloadStrategy <AbstractDownloadStrategy
         ohai "Checking out #{@spec} #{@ref}"
         case @spec
         when :branch
-          nostdout { safe_system 'git', 'checkout', "origin/#{@ref}" }
+          nostdout { quiet_safe_system 'git', 'checkout', "origin/#{@ref}" }
         when :tag
-          nostdout { safe_system 'git', 'checkout', @ref }
+          nostdout { quiet_safe_system 'git', 'checkout', @ref }
         end
       end
       # http://stackoverflow.com/questions/160608/how-to-do-a-git-export-like-svn-export
@@ -187,7 +211,6 @@ class CVSDownloadStrategy <AbstractDownloadStrategy
     FileUtils.cp_r(Dir[HOMEBREW_CACHE+@unique_token+"*"], Dir.pwd)
 
     require 'find'
-
     Find.find(Dir.pwd) do |path|
       if FileTest.directory?(path) && File.basename(path) == "CVS"
         Find.prune
@@ -219,12 +242,18 @@ class MercurialDownloadStrategy <AbstractDownloadStrategy
     url=@url.sub(%r[^hg://], '')
 
     unless @clone.exist?
-      safe_system 'hg', 'clone', url, @clone
+      checkout_args = []
+      if (@spec == :revision) and @ref
+        checkout_args << '-r' << @ref
+      end
+      checkout_args << url << @clone
+      safe_system 'hg', 'clone', *checkout_args
     else
       # TODO hg pull?
       puts "Repository already cloned"
     end
   end
+
   def stage
     dst=Dir.getwd
     Dir.chdir @clone do
