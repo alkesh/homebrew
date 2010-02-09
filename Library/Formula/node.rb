@@ -1,12 +1,15 @@
 require 'formula'
 
 class Node <Formula
-  url 'http://s3.amazonaws.com/four.livejournal/20091206/node-v0.1.21.tar.gz'
+  url 'http://s3.amazonaws.com/four.livejournal/20100203/node-v0.1.27.tar.gz'
+  head 'git://github.com/ry/node.git'
   homepage 'http://nodejs.org/'
-  md5 'c72b29a803d9bb3aed0fce5245d8b03b'
+  md5 '7dffe5ee6a6f531d711235d1227b0989'
 
   aka 'node.js'
-
+  
+  depends_on 'gnutls' => :recommended
+  
   def skip_clean? path
     # TODO: at some point someone should tweak this so it only skips clean
     # for the bits that break the build otherwise

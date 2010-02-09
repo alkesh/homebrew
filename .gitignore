@@ -3,4 +3,8 @@
 !/Library/
 !/README.md
 !/bin/brew
+<<<<<<< HEAD
 *.swp
+=======
+.DS_Store
+>>>>>>> 58285f4d5a8c03ebce43c44ad8e38308f90a91f8
